@@ -34,6 +34,12 @@
   backdrop-filter: blur(8px);
 }
 
+/* The row owns the color tint and selection state; the entry button and the reactions sit inside it. */
+.rolllog-row {
+  border-left: 4px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
 .rolllog-entry {
   width: 100%;
   display: flex;
@@ -43,7 +49,6 @@
   border-radius: var(--radius-sm);
   font-size: 14px;
   border: 0;
-  border-left: 4px solid transparent;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -69,16 +74,16 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 
-.rolllog-list > li:nth-child(odd) .rolllog-entry {
+.rolllog-list > li:nth-child(odd) .rolllog-row {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.rolllog-entry:hover,
-.rolllog-entry.is-selected {
+.rolllog-row:hover,
+.rolllog-row.is-selected {
   background: rgba(232, 147, 74, 0.12);
 }
 
-.rolllog-entry.is-selected {
+.rolllog-row.is-selected {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
@@ -105,4 +110,87 @@
   color: var(--text-faint);
   font-size: 14px;
   padding: 6px 10px;
+}
+
+/* --- Reactions, tucked into the roll's own row --------------------------- */
+
+.rolllog-reactions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px 8px 10px;
+}
+
+.rolllog-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rolllog-chip:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text);
+}
+
+.rolllog-chip.is-mine {
+  border-color: var(--accent);
+  background: rgba(232, 147, 74, 0.18);
+  color: var(--text);
+}
+
+.rolllog-chip-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* Only pull focus to the add button once there is something to add to; it is otherwise the loudest
+   thing in an empty row. */
+.rolllog-chip-add {
+  opacity: 0.55;
+  font-weight: 700;
+}
+
+.rolllog-chip-add:hover,
+.rolllog-chip-add[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.rolllog-picker {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 4px);
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.rolllog-picker button {
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.rolllog-picker button:hover {
+  background: rgba(232, 147, 74, 0.22);
 }

@@ -1,15 +1,6 @@
-import type { RollReaction } from '@rollycast/shared';
 import { useLocalRoller } from '../../state/localRoller';
 import { useRoomStore } from '../../state/roomStore';
-
-const REACTION_LABELS: Record<RollReaction, { symbol: string; label: string }> = {
-  critical: { symbol: '★', label: 'Critical!' },
-  success: { symbol: '✓', label: 'Success' },
-  disaster: { symbol: '!', label: 'Disaster' },
-  suspense: { symbol: '…', label: 'Suspense' },
-  applause: { symbol: '👏', label: 'Applause' },
-  question: { symbol: '?', label: 'Question' },
-};
+import { reactionPresentation } from './reactionCatalog';
 
 export function RollReactions() {
   const reactions = useLocalRoller((s) => s.reactions);
@@ -18,7 +9,7 @@ export function RollReactions() {
   return (
     <div className="roll-reactions" aria-live="polite" aria-label="Roll reactions">
       {reactions.map((reaction) => {
-        const presentation = REACTION_LABELS[reaction.reaction];
+        const presentation = reactionPresentation(reaction.reaction);
         const player = players.find((candidate) => candidate.id === reaction.playerId);
         return (
           <div className="roll-reaction" key={reaction.id}>
