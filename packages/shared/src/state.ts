@@ -26,6 +26,14 @@ export const rollReactionSchema = z.enum([
 ]);
 export type RollReaction = z.infer<typeof rollReactionSchema>;
 
+/** One player's reaction to a roll, stored on the roll so it survives reconnects and late joins. */
+export const rollReactionEntrySchema = z.object({
+  playerId: z.string(),
+  reaction: rollReactionSchema,
+  at: z.number(),
+});
+export type RollReactionEntry = z.infer<typeof rollReactionEntrySchema>;
+
 // --- Core records ----------------------------------------------------------
 
 /** One physical die within a roll's official result (spec §27). */
@@ -76,6 +84,8 @@ export const rollRecordSchema = z.object({
   sourceRollId: z.string().optional(),
   sourceDieIds: z.array(z.string()).optional(),
   createdAt: z.number(),
+  /** Optional so roll records stored before reactions were persisted still parse. */
+  reactions: z.array(rollReactionEntrySchema).optional(),
 });
 export type RollRecord = z.infer<typeof rollRecordSchema>;
 

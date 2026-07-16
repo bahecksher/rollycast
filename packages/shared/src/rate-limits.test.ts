@@ -25,13 +25,21 @@ describe('TokenBucket', () => {
     expect(bucket.available).toBeLessThanOrEqual(3);
   });
 
-  it('enforces the reaction limit of 3 per 10 seconds', () => {
+  it('enforces the reaction limit of 8 per 10 seconds', () => {
     const bucket = new TokenBucket(RATE_LIMITS.reaction, 0);
-    expect(bucket.tryConsume(0)).toBe(true);
-    expect(bucket.tryConsume(0)).toBe(true);
-    expect(bucket.tryConsume(0)).toBe(true);
+    for (let i = 0; i < 8; i += 1) expect(bucket.tryConsume(0)).toBe(true);
     expect(bucket.tryConsume(0)).toBe(false);
-    // One token returns after ~3.34s.
-    expect(bucket.tryConsume(3400)).toBe(true);
+    // One token returns after ~1.25s.
+    expect(bucket.tryConsume(1300)).toBe(true);
+  });
+
+  it('lets emotes burst for a pile-up but still caps a runaway client', () => {
+    const bucket = new TokenBucket(RATE_LIMITS.emote, 0);
+    for (let i = 0; i < RATE_LIMITS.emote.capacity; i += 1) {
+      expect(bucket.tryConsume(0)).toBe(true);
+    }
+    expect(bucket.tryConsume(0)).toBe(false);
+    // Refills at 4/second, so a token is back a quarter-second later.
+    expect(bucket.tryConsume(260)).toBe(true);
   });
 });

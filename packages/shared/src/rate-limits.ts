@@ -16,8 +16,19 @@ export const RATE_LIMITS = {
   grab: { capacity: 5, refillPerSecond: 5 },
   /** 5 profile updates per minute per player. */
   profile: { capacity: 5, refillPerSecond: 5 / 60 },
-  /** 3 reactions per 10 seconds per player. */
-  reaction: { capacity: 3, refillPerSecond: 3 / 10 },
+  /** 8 reactions per 10 seconds per player — a group table reacts in bursts. */
+  reaction: { capacity: 8, refillPerSecond: 8 / 10 },
+  /**
+   * 10 die emotes per player, refilling at 4/second. Emotes are driven by physics contacts rather
+   * than by taps, so this is sized to absorb a messy pile-up without letting a runaway client flood
+   * the room.
+   */
+  emote: { capacity: 10, refillPerSecond: 4 },
+  /**
+   * Keep-alives for an inspected roll. Clients send one every ~10s per inspected roll, so this is
+   * generous for honest use while still bounding a client that spams them.
+   */
+  keepAlive: { capacity: 6, refillPerSecond: 1 },
   /** 10 room-setting changes per minute. */
   roomSettings: { capacity: 10, refillPerSecond: 10 / 60 },
   /** 12 transform updates per second per active roll or grab. */
