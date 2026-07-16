@@ -130,8 +130,69 @@
   text-align: right;
 }
 
-.inspection-actions {
-  width: 100%;
+/* Actions for the selected die, inline in the panel. These used to sit behind an "Actions for
+   selected die" button that opened a second popup on top of this one — one surface, not two. */
+.inspection-die-actions {
+  padding-top: 11px;
+  border-top: 1px solid var(--surface-border);
+}
+
+.inspection-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.inspection-action-grid button {
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inspection-action-grid button:hover,
+.inspection-action-grid button:focus-visible {
+  border-color: rgba(232, 147, 74, 0.5);
+  background: rgba(232, 147, 74, 0.13);
+}
+
+/* An odd number of actions leaves a gap; let the last one take the full width instead. */
+.inspection-action-grid button:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.inspection-action-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.inspection-react {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.inspection-react button {
+  flex: 1;
+  min-height: 32px;
+  border: 1px solid var(--surface-border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.inspection-react button:hover,
+.inspection-react button:focus-visible {
+  border-color: rgba(232, 147, 74, 0.5);
+  background: rgba(232, 147, 74, 0.13);
 }
 
 .inspection-grab-status {

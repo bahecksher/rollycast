@@ -22,6 +22,8 @@ import {
   type ReleaseDiceAsRerollPayload,
   type ReleaseMovedDicePayload,
   type ReactToRollPayload,
+  type DieEmotePayload,
+  type KeepRollAlivePayload,
   type RateLimitName,
   type RollRequestPayload,
   type RollSettledPayload,
@@ -57,6 +59,7 @@ import {
   requestDiceGrab,
 } from './grabs';
 import {
+  UNKEPT_DIE_LIFETIME_MS,
   clearAllVisibleDice,
   clearOwnUnkeptDice,
   clearRollDice,
@@ -185,6 +188,10 @@ export class RoomServer extends Server<Env> {
         return this.handleClearAllDice(connection, msg.payload);
       case ClientMessageType.REACT_TO_ROLL:
         return this.handleReactToRoll(connection, msg.payload);
+      case ClientMessageType.DIE_EMOTE:
+        return this.handleDieEmote(connection, msg.payload);
+      case ClientMessageType.KEEP_ROLL_ALIVE:
+        return this.handleKeepRollAlive(connection, msg.payload);
       case ClientMessageType.PING:
         this.send(
           connection,
@@ -696,11 +703,26 @@ export class RoomServer extends Server<Env> {
     const playerId = this.playerIdOf(connection);
     const room = await this.loadRoom();
     if (!playerId || !room) return;
-    if (!room.rolls.some((roll) => roll.id === payload.rollId)) {
+    const roll = room.rolls.find((candidate) => candidate.id === payload.rollId);
+    if (!roll) {
       return this.sendError(connection, ErrorCode.DIE_UNAVAILABLE, 'That roll is unavailable');
     }
     const now = Date.now();
     if (!this.consumeRateLimit(connection, playerId, 'reaction')) return;
+
+    // Reactions live on the roll record so they survive reconnects and reach late joiners. Reacting
+    // again with the same emote takes it back.
+    const existing = roll.reactions ?? [];
+    const alreadyReacted = existing.some(
+      (entry) => entry.playerId === playerId && entry.reaction === payload.reaction,
+    );
+    roll.reactions = alreadyReacted
+      ? existing.filter(
+          (entry) => !(entry.playerId === playerId && entry.reaction === payload.reaction),
+        )
+      : [...existing, { playerId, reaction: payload.reaction, at: now }];
+
+    // A reaction is table activity: keep the roll's unkept dice around a little longer.
     for (const die of Object.values(room.visibleDice)) {
       if (die.rollId === payload.rollId && !die.kept) {
         die.expiresAt = now + 30_000;
@@ -715,6 +737,69 @@ export class RoomServer extends Server<Env> {
         rollId: payload.rollId,
         reaction: payload.reaction,
         playerId,
+        removed: alreadyReacted,
+        reactions: roll.reactions,
+      }),
+    );
+  }
+
+  /**
+   * Relay a die's reaction to being knocked about. Cosmetic and ephemeral: nothing is stored, no
+   * alarm is rescheduled, and the room is not marked active — an emote is a side effect of physics
+   * that is already keeping the room busy, not an interaction in its own right.
+   */
+  private async handleDieEmote(connection: Connection, payload: DieEmotePayload): Promise<void> {
+    const playerId = this.playerIdOf(connection);
+    const room = await this.loadRoom();
+    if (!playerId || !room) return;
+    // Only emote for a die that is actually on the table. Silently ignore otherwise — dice vanish on
+    // their own timer, so a late emote is an expected race, not an error worth surfacing.
+    if (!room.visibleDice[payload.dieId]) return;
+    if (!this.consumeRateLimit(connection, playerId, 'emote', '', true)) return;
+    this.broadcastMessage(
+      buildMessage(ServerMessageType.DIE_EMOTE, {
+        dieId: payload.dieId,
+        emote: payload.emote,
+        playerId,
+      }),
+    );
+  }
+
+  /**
+   * Hold an inspected roll's dice on the table. A player looking at a die should not have it swept
+   * out from under them, and since inspection is deliberately local-only the server would otherwise
+   * never know. Clients re-send this while the roll stays inspected; when they stop, the dice resume
+   * their normal countdown.
+   */
+  private async handleKeepRollAlive(
+    connection: Connection,
+    payload: KeepRollAlivePayload,
+  ): Promise<void> {
+    const playerId = this.playerIdOf(connection);
+    const room = await this.loadRoom();
+    if (!playerId || !room) return;
+    if (!this.consumeRateLimit(connection, playerId, 'keepAlive', '', true)) return;
+
+    const expiresAt = Date.now() + UNKEPT_DIE_LIFETIME_MS;
+    const dieIds: string[] = [];
+    for (const die of Object.values(room.visibleDice)) {
+      if (die.rollId !== payload.rollId || die.kept || die.status !== 'settled') continue;
+      die.expiresAt = expiresAt;
+      dieIds.push(die.id);
+    }
+    if (dieIds.length === 0) return;
+
+    // Not `touch`: someone reading the table shouldn't extend the room's own 24h lifetime, and the
+    // roll's dice are the only thing that changed.
+    this.roomCache = room;
+    await this.ctx.storage.put(ROOM_KEY, room);
+    await this.scheduleAlarm(room);
+    // Tell everyone, so other clients' expiry fades don't start on a die that is no longer expiring.
+    this.broadcastMessage(
+      buildMessage(ServerMessageType.ROLL_EXPIRY_EXTENDED, {
+        rollId: payload.rollId,
+        dieIds,
+        expiresAt,
       }),
     );
   }
@@ -786,11 +871,17 @@ export class RoomServer extends Server<Env> {
     this.broadcast(JSON.stringify(message), exceptConnectionId ? [exceptConnectionId] : undefined);
   }
 
+  /**
+   * `silent` drops the request without an error reply. Used for physics-driven traffic like emotes,
+   * where hitting the limit is an expected consequence of a busy table and an error per dropped
+   * message would be noisier than the thing it is refusing.
+   */
   private consumeRateLimit(
     connection: Connection,
     playerId: string,
     name: RateLimitName,
     scope = '',
+    silent = false,
   ): boolean {
     const key = `${name}:${playerId}:${scope}`;
     let bucket = this.rateBuckets.get(key);
@@ -799,7 +890,9 @@ export class RoomServer extends Server<Env> {
       this.rateBuckets.set(key, bucket);
     }
     if (bucket.tryConsume()) return true;
-    this.sendError(connection, ErrorCode.RATE_LIMITED, 'That action is moving too quickly');
+    if (!silent) {
+      this.sendError(connection, ErrorCode.RATE_LIMITED, 'That action is moving too quickly');
+    }
     return false;
   }
 

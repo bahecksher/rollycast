@@ -9,6 +9,7 @@ import {
   type RoomAppearance,
   type DiceHandlingMode,
   type RollReaction,
+  type DieEmote,
 } from '@rollycast/shared';
 import type PartySocket from 'partysocket';
 
@@ -175,6 +176,16 @@ export function clearAllRoomDice(hostToken: string): boolean {
 
 export function reactToRoomRoll(rollId: string, reaction: RollReaction): boolean {
   return send(buildMessage(ClientMessageType.REACT_TO_ROLL, { rollId, reaction }));
+}
+
+/** Tell the room a die reacted to being knocked into. Cosmetic, so a failed send is not worth surfacing. */
+export function sendDieEmote(dieId: string, emote: DieEmote): boolean {
+  return send(buildMessage(ClientMessageType.DIE_EMOTE, { dieId, emote }));
+}
+
+/** Ask the server to hold an inspected roll's dice on the table a while longer. */
+export function keepRollAlive(rollId: string): boolean {
+  return send(buildMessage(ClientMessageType.KEEP_ROLL_ALIVE, { rollId }));
 }
 
 /** Update this player's display name and/or dice color; the server broadcasts the confirmed values. */

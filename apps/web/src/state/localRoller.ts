@@ -19,8 +19,12 @@ import {
   type DieKeptUpdatedPayload,
   type RollClearedPayload,
   type RollReaction,
+  type RollReactionEntry,
   type RollReactionPayload,
   type RoomSnapshot,
+  type DieEmote,
+  type DieEmoteBroadcastPayload,
+  type RollExpiryExtendedPayload,
   type DieType,
   type DiceSelection,
 } from '@rollycast/shared';
@@ -33,6 +37,7 @@ import {
   requestDiceReroll,
   requestDiceMove,
   requestRoomRoll,
+  sendDieEmote,
   settleRoomRoll,
   setRoomDieKept,
   streamHeldDiceTransforms,
@@ -61,6 +66,8 @@ export interface LocalRollEntry {
   colorHex?: string;
   /** Text for an 'event' row, e.g. "Color switch: Bee". */
   label?: string;
+  /** Who reacted to this roll and how. Server-persisted, so it survives reconnects. */
+  reactions: RollReactionEntry[];
 }
 
 export interface LocalRollReaction {
@@ -69,6 +76,16 @@ export interface LocalRollReaction {
   reaction: RollReaction;
   playerId: string;
 }
+
+/** An emote floating above a die right now. Cosmetic and short-lived; never recorded. */
+export interface LocalDieEmote {
+  id: string;
+  dieId: string;
+  emote: DieEmote;
+  at: number;
+}
+
+const DIE_EMOTE_LIFETIME_MS = 1200;
 
 const DEFAULT_COLOR = DICE_COLORS[0]!;
 const UNKEPT_DIE_LIFETIME_MS = 30_000;
@@ -126,6 +143,7 @@ function entryForRoll(
     at: roll.createdAt,
     ownerName: 'ownerNameAtRoll' in roll ? roll.ownerNameAtRoll : ownerName,
     colorHex,
+    reactions: 'reactions' in roll ? (roll.reactions ?? []) : [],
   };
 }
 
@@ -172,6 +190,7 @@ interface LocalRollerState {
   activeGrab: (PublicGrabLock & { isController: boolean }) | null;
   grabMessage: string | null;
   reactions: LocalRollReaction[];
+  dieEmotes: LocalDieEmote[];
   setType: (type: SelectableDieType) => void;
   setColor: (color: { hex: string; text: string }) => void;
   setQuantity: (quantity: number) => void;
@@ -223,6 +242,10 @@ interface LocalRollerState {
   receiveDiceCleared: (payload: AllDiceClearedPayload) => void;
   reactToRoll: (rollId: string, reaction: RollReaction) => void;
   receiveReaction: (payload: RollReactionPayload) => void;
+  /** This client's die was knocked into; tell the room so everyone sees it react. */
+  emitDieEmote: (dieId: string, emote: DieEmote) => void;
+  receiveDieEmote: (payload: DieEmoteBroadcastPayload) => void;
+  receiveExpiryExtended: (payload: RollExpiryExtendedPayload) => void;
   clearDice: () => void;
   resetRoom: () => void;
   /** Prepend a non-roll note (e.g. a name or color change) to the history, tinted with a color. */
@@ -247,6 +270,7 @@ export const useLocalRoller = create<LocalRollerState>((set, get) => ({
   activeGrab: null,
   grabMessage: null,
   reactions: [],
+  dieEmotes: [],
 
   setType: (type) => set((state) => ({ selection: { ...state.selection, type } })),
   setColor: (color) => set({ color }),
@@ -316,6 +340,7 @@ export const useLocalRoller = create<LocalRollerState>((set, get) => ({
       activeGrab: null,
       grabMessage: null,
       reactions: [],
+      dieEmotes: [],
     });
   },
 
@@ -692,11 +717,62 @@ export const useLocalRoller = create<LocalRollerState>((set, get) => ({
   },
 
   receiveReaction: (payload) => {
+    // The server sends the roll's full reaction set, so adopt it wholesale rather than applying a
+    // delta — a dropped message then can't leave a row permanently wrong.
+    set((state) => ({
+      log: state.log.map((entry) =>
+        entry.id === payload.rollId ? { ...entry, reactions: payload.reactions } : entry,
+      ),
+      rollMeta: state.rollMeta[payload.rollId]
+        ? {
+            ...state.rollMeta,
+            [payload.rollId]: { ...state.rollMeta[payload.rollId]!, reactions: payload.reactions },
+          }
+        : state.rollMeta,
+    }));
+
+    // Taking a reaction back is a correction, not a moment — no toast for it.
+    if (payload.removed) return;
     const id = `${payload.playerId}:${payload.rollId}:${Date.now()}`;
-    set((state) => ({ reactions: [...state.reactions, { id, ...payload }] }));
+    set((state) => ({
+      reactions: [
+        ...state.reactions,
+        { id, rollId: payload.rollId, reaction: payload.reaction, playerId: payload.playerId },
+      ],
+    }));
     window.setTimeout(() => {
       set((state) => ({ reactions: state.reactions.filter((reaction) => reaction.id !== id) }));
     }, 1800);
+  },
+
+  emitDieEmote: (dieId, emote) => {
+    // Fire and forget. The server echoes it back to everyone including us, so the emote we show is
+    // the same one everyone else sees — and a dropped emote is simply a joke that didn't land.
+    sendDieEmote(dieId, emote);
+  },
+
+  receiveDieEmote: (payload) => {
+    const id = `${payload.dieId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    set((state) => ({
+      // One emote per die at a time: a fresh knock replaces the old reaction rather than stacking
+      // glyphs on top of each other.
+      dieEmotes: [
+        ...state.dieEmotes.filter((item) => item.dieId !== payload.dieId),
+        { id, dieId: payload.dieId, emote: payload.emote, at: Date.now() },
+      ],
+    }));
+    window.setTimeout(() => {
+      set((state) => ({ dieEmotes: state.dieEmotes.filter((item) => item.id !== id) }));
+    }, DIE_EMOTE_LIFETIME_MS);
+  },
+
+  receiveExpiryExtended: (payload) => {
+    const dieIds = new Set(payload.dieIds);
+    set((state) => ({
+      activeDice: state.activeDice.map((die) =>
+        dieIds.has(die.id) && !die.kept ? { ...die, expiresAt: payload.expiresAt } : die,
+      ),
+    }));
   },
 
   clearDice: () => set({ activeDice: [] }),
@@ -715,6 +791,7 @@ export const useLocalRoller = create<LocalRollerState>((set, get) => ({
       activeGrab: null,
       grabMessage: null,
       reactions: [],
+      dieEmotes: [],
     });
   },
 
@@ -730,6 +807,7 @@ export const useLocalRoller = create<LocalRollerState>((set, get) => ({
           at: Date.now(),
           label,
           colorHex,
+          reactions: [],
         },
         ...state.log,
       ].slice(0, 100),

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { diceSelectionSchema } from './dice';
+import { dieEmoteSchema } from './emotes';
 import {
   ClientMessageType,
   PROTOCOL_VERSION,
@@ -13,6 +14,7 @@ import {
   grabActionSchema,
   publicGrabLockSchema,
   publicPlayerSchema,
+  rollReactionEntrySchema,
   rollReactionSchema,
   roomAppearanceUpdateSchema,
   roomSettingsSchema,
@@ -117,6 +119,23 @@ export const reactToRollPayloadSchema = z.object({
 });
 export type ReactToRollPayload = z.infer<typeof reactToRollPayloadSchema>;
 
+/** A die reacting to being knocked into, sent by the client simulating that die. */
+export const dieEmotePayloadSchema = z.object({
+  dieId: z.string(),
+  emote: dieEmoteSchema,
+});
+export type DieEmotePayload = z.infer<typeof dieEmotePayloadSchema>;
+
+/**
+ * "Someone still wants this roll on the table" — sent while a client has the roll inspected, to stop
+ * its dice expiring out from under them. Deliberately says nothing about *who* is looking or which
+ * die is selected: inspection stays local (spec §9), this only extends a die's life.
+ */
+export const keepRollAlivePayloadSchema = z.object({
+  rollId: z.string(),
+});
+export type KeepRollAlivePayload = z.infer<typeof keepRollAlivePayloadSchema>;
+
 export const updateRoomSettingsPayloadSchema = z.object({
   hostToken: z.string(),
   diceHandlingMode: diceHandlingModeSchema.optional(),
@@ -153,6 +172,8 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   envelope(ClientMessageType.CLEAR_ROLL, clearRollPayloadSchema),
   envelope(ClientMessageType.CLEAR_OWN_UNKEPT_DICE, emptyPayloadSchema),
   envelope(ClientMessageType.REACT_TO_ROLL, reactToRollPayloadSchema),
+  envelope(ClientMessageType.DIE_EMOTE, dieEmotePayloadSchema),
+  envelope(ClientMessageType.KEEP_ROLL_ALIVE, keepRollAlivePayloadSchema),
   envelope(ClientMessageType.UPDATE_ROOM_SETTINGS, updateRoomSettingsPayloadSchema),
   envelope(ClientMessageType.CLEAR_ALL_DICE, clearAllDicePayloadSchema),
   envelope(ClientMessageType.PING, pingPayloadSchema),
@@ -277,8 +298,31 @@ export const rollReactionPayloadSchema = z.object({
   rollId: z.string(),
   reaction: rollReactionSchema,
   playerId: z.string(),
+  /** True when the player took their reaction back, so clients can skip the celebratory toast. */
+  removed: z.boolean(),
+  /** The roll's full reaction set after the change — authoritative, so a dropped delta self-heals. */
+  reactions: z.array(rollReactionEntrySchema),
 });
 export type RollReactionPayload = z.infer<typeof rollReactionPayloadSchema>;
+
+/**
+ * A die's reaction to a knock, relayed to the room. Cosmetic and ephemeral — unlike a roll reaction
+ * this is never stored on the roll record.
+ */
+export const dieEmoteBroadcastPayloadSchema = z.object({
+  dieId: z.string(),
+  emote: dieEmoteSchema,
+  playerId: z.string(),
+});
+export type DieEmoteBroadcastPayload = z.infer<typeof dieEmoteBroadcastPayloadSchema>;
+
+/** New expiry for an inspected roll's dice, so every client's fade agrees with the server's sweep. */
+export const rollExpiryExtendedPayloadSchema = z.object({
+  rollId: z.string(),
+  dieIds: z.array(z.string()),
+  expiresAt: z.number(),
+});
+export type RollExpiryExtendedPayload = z.infer<typeof rollExpiryExtendedPayloadSchema>;
 
 export const roomClosedPayloadSchema = z.object({
   reason: z.string().optional(),
@@ -321,6 +365,8 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   envelope(ServerMessageType.ROLL_CLEARED, rollClearedPayloadSchema),
   envelope(ServerMessageType.ALL_DICE_CLEARED, allDiceClearedPayloadSchema),
   envelope(ServerMessageType.ROLL_REACTION, rollReactionPayloadSchema),
+  envelope(ServerMessageType.DIE_EMOTE, dieEmoteBroadcastPayloadSchema),
+  envelope(ServerMessageType.ROLL_EXPIRY_EXTENDED, rollExpiryExtendedPayloadSchema),
   envelope(ServerMessageType.ROOM_CLOSED, roomClosedPayloadSchema),
   envelope(ServerMessageType.PONG, pongPayloadSchema),
   envelope(ServerMessageType.ERROR, errorPayloadSchema),

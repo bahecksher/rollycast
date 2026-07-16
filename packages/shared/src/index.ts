@@ -5,6 +5,7 @@ export * from './rng';
 export * from './players';
 export * from './notation';
 export * from './interactions';
+export * from './emotes';
 export * from './rate-limits';
 export * from './protocol';
 export * from './state';

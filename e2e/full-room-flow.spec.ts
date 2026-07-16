@@ -41,14 +41,21 @@ async function openHistory(page: Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
+/** The dice tray is collapsed behind the floating "Dice" menu, so the Roll button starts hidden. */
+async function openDiceTray(page: Page) {
+  await page.locator('.dock-menu-toggle').click();
+  await expect(page.getByRole('button', { name: /^Roll / })).toBeVisible();
+}
+
+/** Inspecting a roll shows its die's actions inline — there is no separate actions popup to open. */
 async function inspectNewest(page: Page) {
   await openHistory(page);
   await page.locator('.rolllog-entry').first().click();
-  await expect(page.getByRole('button', { name: 'Actions for selected die' })).toBeVisible();
+  await expect(page.locator('.inspection-panel')).toBeVisible();
 }
 
-async function openActions(page: Page) {
-  await page.getByRole('button', { name: 'Actions for selected die' }).click();
+function rerollAction(page: Page) {
+  return page.locator('.inspection-action-grid').getByRole('button', { name: 'Reroll' });
 }
 
 async function throwHeldDie(page: Page) {
@@ -77,52 +84,39 @@ test('complete owner, shared-reroll, reaction, and reconnect flow', async ({
   const guest = await joinPlayer(browser, options, host.roomUrl, 'Bob');
 
   await expect(host.page.getByLabel(/2 connected players/)).toBeVisible();
+  await openDiceTray(host.page);
   await host.page.getByRole('button', { name: 'Roll 1d20' }).click();
   await openHistory(host.page);
   await openHistory(guest.page);
   await expect(host.page.locator('.rolllog-entry')).toHaveCount(1, { timeout: 15_000 });
   await expect(guest.page.locator('.rolllog-entry')).toHaveCount(1, { timeout: 15_000 });
 
+  // Owner-only by default: the guest is offered no actions at all on someone else's die.
   await inspectNewest(guest.page);
-  await openActions(guest.page);
-  await expect(guest.page.getByRole('menuitem', { name: 'Pick up and reroll' })).toHaveCount(0);
-  await guest.page.getByRole('button', { name: 'Close die actions' }).click();
+  await expect(rerollAction(guest.page)).toHaveCount(0);
+  await expect(guest.page.locator('.inspection-action-empty')).toBeVisible();
 
   await inspectNewest(host.page);
-  await openActions(host.page);
-  await host.page.getByRole('menuitem', { name: 'Pick up and reroll' }).click();
+  await rerollAction(host.page).click();
   await throwHeldDie(host.page);
   await expect(host.page.locator('.rolllog-entry')).toHaveCount(2, { timeout: 15_000 });
   await expect(guest.page.locator('.rolllog-entry')).toHaveCount(2, { timeout: 15_000 });
 
-  await inspectNewest(host.page);
-  await openActions(host.page);
-  await host.page.getByRole('menuitem', { name: 'Keep die' }).click();
-
+  // Anyone may react, including on a die they do not own.
   await inspectNewest(guest.page);
-  await openActions(guest.page);
-  await guest.page.getByRole('menuitem', { name: 'React' }).click();
-  await guest.page.getByRole('button', { name: 'Applause' }).click();
+  await guest.page.locator('.inspection-react').getByRole('button', { name: 'Applause' }).click();
   await expect(host.page.locator('.roll-reaction')).toContainText('Applause');
 
-  await host.page.getByLabel('Table appearance').click();
+  await host.page.getByLabel('Host controls').click();
   await host.page.locator('.room-handling-setting select').selectOption('shared_rerolls');
   await expect(host.page.locator('.room-handling-setting select')).toHaveValue('shared_rerolls');
   // Close the floating appearance panel so it stops overlaying the roll log the host clicks next.
-  await host.page.getByLabel('Table appearance').click();
+  await host.page.getByLabel('Host controls').click();
 
+  // Shared rerolls: the guest can now pick up the host's die.
   await inspectNewest(guest.page);
-  await openActions(guest.page);
-  await expect(guest.page.getByRole('menuitem', { name: 'Pick up and reroll' })).toHaveCount(0);
-  await guest.page.getByRole('button', { name: 'Close die actions' }).click();
-
-  await inspectNewest(host.page);
-  await openActions(host.page);
-  await host.page.getByRole('menuitem', { name: 'Release die' }).click();
-
-  await inspectNewest(guest.page);
-  await openActions(guest.page);
-  await guest.page.getByRole('menuitem', { name: 'Pick up and reroll' }).click();
+  await expect(rerollAction(guest.page)).toBeVisible({ timeout: 10_000 });
+  await rerollAction(guest.page).click();
   await throwHeldDie(guest.page);
   await expect(guest.page.locator('.rolllog-entry')).toHaveCount(3, { timeout: 15_000 });
   await expect(host.page.locator('.rolllog-entry')).toHaveCount(3, { timeout: 15_000 });

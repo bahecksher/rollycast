@@ -20,9 +20,7 @@ async function joinExisting(browser: Browser, roomUrl: string, displayName: stri
   return { context, page };
 }
 
-test('a server-authoritative roll is shared and available to a late joiner', async ({
-  browser,
-}) => {
+test('a reaction on a history row reaches the room and survives a reload', async ({ browser }) => {
   const ownerContext = await browser.newContext();
   const owner = await ownerContext.newPage();
   const roomUrl = await createAndJoin(owner, 'Alice');
@@ -35,23 +33,34 @@ test('a server-authoritative roll is shared and available to a late joiner', asy
   await observer.page.getByRole('button', { name: /^History/ }).click();
   await expect(owner.locator('.rolllog-entry')).toHaveCount(1, { timeout: 15_000 });
   await expect(observer.page.locator('.rolllog-entry')).toHaveCount(1, { timeout: 15_000 });
-  const ownerResult = (await owner.locator('.rolllog-entry').innerText())
-    .replace(/\s+/g, ' ')
-    .trim();
-  const observerResult = (await observer.page.locator('.rolllog-entry').innerText())
-    .replace(/\s+/g, ' ')
-    .trim();
-  expect(observerResult).toBe(ownerResult);
 
-  const late = await joinExisting(browser, roomUrl, 'Charlie');
-  await late.page.getByRole('button', { name: /^History/ }).click();
-  await expect(late.page.locator('.rolllog-entry')).toHaveCount(1);
-  const lateResult = (await late.page.locator('.rolllog-entry').innerText())
-    .replace(/\s+/g, ' ')
-    .trim();
-  expect(lateResult).toBe(ownerResult);
+  // React from the roll's own row, which is reachable whether or not the dice are still on the table.
+  await observer.page.getByRole('button', { name: 'React to this roll' }).click();
+  await observer.page.getByRole('button', { name: 'Applause', exact: true }).click();
 
-  await late.context.close();
-  await observer.context.close();
+  // The reaction is the observer's, so only their chip reads as "including yours".
+  const observerChip = observer.page.getByRole('button', { name: /Applause, 1 reaction/ });
+  await expect(observerChip).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
+  const ownerChip = owner.getByRole('button', { name: /Applause, 1 reaction/ });
+  await expect(ownerChip).toBeVisible({ timeout: 15_000 });
+  await expect(ownerChip).toHaveAttribute('aria-pressed', 'false');
+
+  // Reactions are stored on the roll record, so a reload must not lose them. The client rejoins on
+  // its own from the stored identity, so there is no join panel to fill in here.
+  await owner.reload();
+  await expect(owner.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
+  await owner.getByRole('button', { name: /^History/ }).click();
+  await expect(owner.getByRole('button', { name: /Applause, 1 reaction/ })).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // Reacting again with the same emote takes it back, for everyone.
+  await observerChip.click();
+  await expect(observer.page.getByRole('button', { name: /Applause/ })).toHaveCount(0, {
+    timeout: 15_000,
+  });
+  await expect(owner.getByRole('button', { name: /Applause/ })).toHaveCount(0, { timeout: 15_000 });
+
   await ownerContext.close();
+  await observer.context.close();
 });

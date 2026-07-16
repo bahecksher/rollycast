@@ -1,6 +1,7 @@
 import {
   ClientMessageType,
   ErrorCode,
+  RATE_LIMITS,
   ServerMessageType,
   buildMessage,
   type ServerMessage,
@@ -696,24 +697,52 @@ describe('shared rolls', () => {
       rollId: sharedReroll.payload.rollId,
       reaction: 'applause',
       playerId: observerJoined.payload.playerId,
+      removed: false,
     });
+    // Reactions are stored on the roll, not just announced, so the broadcast carries the full set.
+    expect(reaction.payload.reactions).toMatchObject([
+      { playerId: observerJoined.payload.playerId, reaction: 'applause' },
+    ]);
 
-    for (const nextReaction of ['success', 'question'] as const) {
-      observer.send(
-        JSON.stringify(
-          buildMessage(ClientMessageType.REACT_TO_ROLL, {
-            rollId: sharedReroll.payload.rollId,
-            reaction: nextReaction,
-          }),
-        ),
-      );
-    }
-    await ownerMessages.waitForCount(ServerMessageType.ROLL_REACTION, 3);
+    // Reacting again with the same emote takes it back.
     observer.send(
       JSON.stringify(
         buildMessage(ClientMessageType.REACT_TO_ROLL, {
           rollId: sharedReroll.payload.rollId,
-          reaction: 'disaster',
+          reaction: 'applause',
+        }),
+      ),
+    );
+    const [, undone] = await ownerMessages.waitForCount(ServerMessageType.ROLL_REACTION, 2);
+    if (undone?.type !== ServerMessageType.ROLL_REACTION) {
+      throw new Error('Expected ROLL_REACTION');
+    }
+    expect(undone.payload.removed).toBe(true);
+    expect(undone.payload.reactions).toEqual([]);
+
+    // Spend the rest of the bucket, then confirm the next one is refused. Derived from the config so
+    // this stays honest if the limit is retuned.
+    const spent = 2;
+    const cycle = ['success', 'question', 'critical', 'disaster', 'suspense'] as const;
+    for (let i = 0; i < RATE_LIMITS.reaction.capacity - spent; i += 1) {
+      observer.send(
+        JSON.stringify(
+          buildMessage(ClientMessageType.REACT_TO_ROLL, {
+            rollId: sharedReroll.payload.rollId,
+            reaction: cycle[i % cycle.length]!,
+          }),
+        ),
+      );
+    }
+    await ownerMessages.waitForCount(
+      ServerMessageType.ROLL_REACTION,
+      RATE_LIMITS.reaction.capacity,
+    );
+    observer.send(
+      JSON.stringify(
+        buildMessage(ClientMessageType.REACT_TO_ROLL, {
+          rollId: sharedReroll.payload.rollId,
+          reaction: 'applause',
         }),
       ),
     );
@@ -748,5 +777,104 @@ describe('shared rolls', () => {
     owner.close(1000, 'done');
     observer.close(1000, 'done');
     late.close(1000, 'done');
+  });
+
+  test('keeping an inspected roll alive pushes its dice expiry out', async () => {
+    const code = await createRoom();
+    const roller = await connect(code);
+    const messages = collect(roller);
+    join(roller, code, 'Roller');
+    await messages.waitFor(ServerMessageType.JOINED);
+
+    requestD20(roller, 'keepalive-roll');
+    const created = await messages.waitFor(ServerMessageType.ROLL_CREATED);
+    if (created.type !== ServerMessageType.ROLL_CREATED) throw new Error('Expected ROLL_CREATED');
+    const dieId = created.payload.dice[0]!.dieId;
+    const rollId = created.payload.rollId;
+
+    // A die only starts expiring once it has settled.
+    roller.send(
+      JSON.stringify(
+        buildMessage(ClientMessageType.ROLL_SETTLED, {
+          rollId,
+          transforms: [{ dieId, position: [0, 0.6, 0], rotation: [0, 0, 0, 1] }],
+        }),
+      ),
+    );
+    await messages.waitFor(ServerMessageType.ROLL_FINALIZED);
+
+    const before = Date.now();
+    roller.send(JSON.stringify(buildMessage(ClientMessageType.KEEP_ROLL_ALIVE, { rollId })));
+    const extended = await messages.waitFor(ServerMessageType.ROLL_EXPIRY_EXTENDED);
+    if (extended.type !== ServerMessageType.ROLL_EXPIRY_EXTENDED) {
+      throw new Error('Expected ROLL_EXPIRY_EXTENDED');
+    }
+    expect(extended.payload.rollId).toBe(rollId);
+    expect(extended.payload.dieIds).toEqual([dieId]);
+    // Pushed out to roughly a full lifetime from now, not merely nudged.
+    expect(extended.payload.expiresAt).toBeGreaterThanOrEqual(before + 29_000);
+
+    // A keep-alive for a roll that doesn't exist is ignored rather than erroring. Ping afterwards so
+    // the reply proves the server processed both messages before we assert nothing went wrong.
+    roller.send(
+      JSON.stringify(buildMessage(ClientMessageType.KEEP_ROLL_ALIVE, { rollId: 'no-such-roll' })),
+    );
+    roller.send(JSON.stringify(buildMessage(ClientMessageType.PING, { clientTime: Date.now() })));
+    await messages.waitFor(ServerMessageType.PONG);
+    expect(messages.messages.some((message) => message.type === ServerMessageType.ERROR)).toBe(
+      false,
+    );
+
+    roller.close(1000, 'done');
+  });
+
+  test('relays a die emote to the room and ignores one for a die that is gone', async () => {
+    const code = await createRoom();
+    const roller = await connect(code);
+    const rollerMessages = collect(roller);
+    join(roller, code, 'Roller');
+    await rollerMessages.waitFor(ServerMessageType.JOINED);
+
+    const watcher = await connect(code);
+    const watcherMessages = collect(watcher);
+    join(watcher, code, 'Watcher');
+    const watcherJoined = await watcherMessages.waitFor(ServerMessageType.JOINED);
+    if (watcherJoined.type !== ServerMessageType.JOINED) throw new Error('Expected JOINED');
+    await watcherMessages.waitFor(ServerMessageType.ROOM_STATE);
+
+    requestD20(roller, 'emote-roll');
+    const created = await rollerMessages.waitFor(ServerMessageType.ROLL_CREATED);
+    if (created.type !== ServerMessageType.ROLL_CREATED) throw new Error('Expected ROLL_CREATED');
+    const dieId = created.payload.dice[0]!.dieId;
+
+    // The die that got knocked belongs to the roller, but the whole room should see it react.
+    roller.send(
+      JSON.stringify(buildMessage(ClientMessageType.DIE_EMOTE, { dieId, emote: 'dizzy' })),
+    );
+    const relayed = await watcherMessages.waitFor(ServerMessageType.DIE_EMOTE);
+    if (relayed.type !== ServerMessageType.DIE_EMOTE) throw new Error('Expected DIE_EMOTE');
+    expect(relayed.payload).toMatchObject({ dieId, emote: 'dizzy' });
+
+    // An emote for a die that no longer exists is dropped silently — dice expire on their own timer,
+    // so a late emote is an expected race rather than an error worth reporting.
+    watcher.send(
+      JSON.stringify(
+        buildMessage(ClientMessageType.DIE_EMOTE, { dieId: 'no-such-die', emote: 'angry' }),
+      ),
+    );
+    watcher.send(
+      JSON.stringify(buildMessage(ClientMessageType.DIE_EMOTE, { dieId, emote: 'hurt' })),
+    );
+    const relayedToWatcher = await watcherMessages.waitForCount(ServerMessageType.DIE_EMOTE, 2);
+    expect(relayedToWatcher.map((message) => message.payload)).toMatchObject([
+      { emote: 'dizzy' },
+      { emote: 'hurt' },
+    ]);
+    expect(
+      watcherMessages.messages.some((message) => message.type === ServerMessageType.ERROR),
+    ).toBe(false);
+
+    roller.close(1000, 'done');
+    watcher.close(1000, 'done');
   });
 });

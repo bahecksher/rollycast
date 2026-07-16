@@ -21,9 +21,9 @@ test('the host customizes the shared table appearance and keeps it after reload'
   await guest.getByLabel('Display name').fill('Guest');
   await guest.getByRole('button', { name: 'Join table' }).click();
   await expect(guest.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
-  await expect(guest.getByLabel('Table appearance')).toHaveCount(0);
+  await expect(guest.getByLabel('Host controls')).toHaveCount(0);
 
-  await host.getByLabel('Table appearance').click();
+  await host.getByLabel('Host controls').click();
   const surface = host.getByLabel('Surface');
   await surface.evaluate((node) => {
     const input = node as HTMLInputElement;
@@ -56,7 +56,7 @@ test('the host customizes the shared table appearance and keeps it after reload'
 
   await host.reload();
   await expect(host.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
-  await host.getByLabel('Table appearance').click();
+  await host.getByLabel('Host controls').click();
   await expect(host.getByLabel('Surface')).toHaveValue('#345678');
   await expect
     .poll(() =>

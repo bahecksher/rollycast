@@ -1,31 +1,35 @@
-import {
-  canClearDie,
-  canKeepDie,
-  canMoveDie,
-  canRerollDie,
-  type RollCreatedPayload,
-  type RollReaction,
-  type RollRecord,
-} from '@rollycast/shared';
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { type RollCreatedPayload, type RollReaction, type RollRecord } from '@rollycast/shared';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { keepRollAlive } from '../../network/roomCommands';
 import { useInspectionStore } from '../../state/inspectionStore';
 import { useLocalRoller } from '../../state/localRoller';
 import { useRoomStore } from '../../state/roomStore';
+import { dieActionsFor, type DieActionHandlers } from './dieActions';
+import { REACTION_CATALOG } from './reactionCatalog';
 import './inspection.css';
 
 type RollMeta = RollCreatedPayload | RollRecord;
+
+/** Comfortably inside the 30s unkept-die lifetime, so a dropped keep-alive isn't fatal. */
+const KEEP_ALIVE_INTERVAL_MS = 10_000;
+
+/**
+ * Hold the inspected roll's dice on the table for as long as it stays inspected. Without this a die
+ * you are looking at is swept after 30s and the panel vanishes mid-read.
+ */
+function useKeepInspectedRollAlive(rollId: string | null): void {
+  useEffect(() => {
+    if (!rollId) return;
+    keepRollAlive(rollId);
+    const timer = window.setInterval(() => keepRollAlive(rollId), KEEP_ALIVE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [rollId]);
+}
 
 export function InspectionOverlay() {
   const selectedRollId = useInspectionStore((s) => s.selectedRollId);
   const selectedDieId = useInspectionStore((s) => s.selectedDieId);
   const actionMenu = useInspectionStore((s) => s.actionMenu);
-  const rerollDieIds = useInspectionStore((s) => s.rerollDieIds);
-  const selectingMultiple = useInspectionStore((s) => s.selectingMultiple);
-  const focusDie = useInspectionStore((s) => s.focusDie);
-  const toggleRerollDie = useInspectionStore((s) => s.toggleRerollDie);
-  const beginMultiSelect = useInspectionStore((s) => s.beginMultiSelect);
-  const cancelMultiSelect = useInspectionStore((s) => s.cancelMultiSelect);
-  const openActionMenu = useInspectionStore((s) => s.openActionMenu);
   const closeActionMenu = useInspectionStore((s) => s.closeActionMenu);
   const clearInspection = useInspectionStore((s) => s.clearInspection);
   const activeDice = useLocalRoller((s) => s.activeDice);
@@ -34,13 +38,16 @@ export function InspectionOverlay() {
   const ownerNames = useLocalRoller((s) => s.ownerNames);
   const players = useRoomStore((s) => s.players);
   const requestReroll = useLocalRoller((s) => s.requestReroll);
-  const requestMove = useLocalRoller((s) => s.requestMove);
-  const setKept = useLocalRoller((s) => s.setKept);
   const clearRoll = useLocalRoller((s) => s.clearRoll);
   const reactToRoll = useLocalRoller((s) => s.reactToRoll);
   const cancelActiveGrab = useLocalRoller((s) => s.cancelActiveGrab);
   const activeGrab = useLocalRoller((s) => s.activeGrab);
   const grabMessage = useLocalRoller((s) => s.grabMessage);
+  const self = useRoomStore((s) => s.self);
+  const mode = useRoomStore((s) => s.settings.diceHandlingMode);
+
+  // Before the early return: hooks must run on every render.
+  useKeepInspectedRollAlive(selectedRollId);
 
   if (!selectedRollId) return null;
 
@@ -53,14 +60,12 @@ export function InspectionOverlay() {
   const ownerName = ownerNameFor(meta, ownerNames[selectedRollId]);
   const actingName = actingNameFor(meta, players);
 
-  const openMenuFromElement = (element: HTMLElement, dieId = selectedDie?.id) => {
-    if (!dieId) return;
-    const rect = element.getBoundingClientRect();
-    openActionMenu(dieId, selectedRollId, {
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height,
-    });
+  const handlers: DieActionHandlers = {
+    onRequestReroll: (id) => requestReroll([id]),
+    onClearRoll: () => clearRoll(selectedRollId),
   };
+  const panelActions =
+    selectedDie && self ? dieActionsFor(selectedDie, self.playerId, mode, handlers) : [];
 
   return (
     <>
@@ -85,47 +90,7 @@ export function InspectionOverlay() {
           <span className="inspection-total">{entry.total}</span>
         </div>
 
-        <div className="inspection-results" aria-label="Individual dice results">
-          {dice.map((die, index) => (
-            <button
-              type="button"
-              key={die.id}
-              className={
-                selectedDieId === die.id || rerollDieIds.includes(die.id) ? 'is-selected' : ''
-              }
-              onClick={() =>
-                selectingMultiple
-                  ? toggleRerollDie(die.id, die.rollId)
-                  : focusDie(die.id, die.rollId)
-              }
-              onContextMenu={(event) => {
-                event.preventDefault();
-                focusDie(die.id, die.rollId);
-                openMenuFromElement(event.currentTarget, die.id);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-                  event.preventDefault();
-                  focusDie(die.id, die.rollId);
-                  openMenuFromElement(event.currentTarget, die.id);
-                }
-              }}
-              aria-pressed={
-                selectingMultiple ? rerollDieIds.includes(die.id) : selectedDieId === die.id
-              }
-              aria-label={`${die.type} result ${displayDieResult(die)}, die ${index + 1}`}
-            >
-              <span>{die.type}</span>
-              <strong>{displayDieResult(die)}</strong>
-            </button>
-          ))}
-        </div>
-
         <dl className="inspection-details">
-          <div>
-            <dt>Modifier</dt>
-            <dd>{meta.modifier >= 0 ? `+${meta.modifier}` : meta.modifier}</dd>
-          </div>
           <div>
             <dt>Rolled</dt>
             <dd>
@@ -150,31 +115,31 @@ export function InspectionOverlay() {
         </dl>
 
         {selectedDie && (
-          <button
-            type="button"
-            className="btn btn-primary inspection-actions"
-            onClick={(event) => openMenuFromElement(event.currentTarget)}
-            onKeyDown={(event) =>
-              openMenuWithKeyboard(event, () => openMenuFromElement(event.currentTarget))
-            }
-          >
-            Actions for selected die
-          </button>
-        )}
-        {selectingMultiple && (
-          <div className="inspection-multi-actions">
-            <span>{rerollDieIds.length} selected</span>
-            <button type="button" onClick={cancelMultiSelect}>
-              Cancel selection
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={rerollDieIds.length === 0}
-              onClick={() => requestReroll(rerollDieIds)}
-            >
-              Pick up selected
-            </button>
+          <div className="inspection-die-actions">
+            {panelActions.length > 0 ? (
+              <div className="inspection-action-grid">
+                {panelActions.map((action) => (
+                  <button key={action.key} type="button" onClick={action.run}>
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="inspection-action-empty">No actions available for this die.</p>
+            )}
+            <div className="inspection-react" role="group" aria-label="React to this roll">
+              {REACTION_CATALOG.map((item) => (
+                <button
+                  key={item.reaction}
+                  type="button"
+                  onClick={() => reactToRoll(selectedRollId, item.reaction)}
+                  aria-label={item.label}
+                  title={item.label}
+                >
+                  <span aria-hidden="true">{item.symbol}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {grabMessage && (
@@ -200,18 +165,6 @@ export function InspectionOverlay() {
             requestReroll([selectedId]);
             closeActionMenu();
           }}
-          onSelectMore={(selectedId) => {
-            beginMultiSelect(selectedId, actionMenu.rollId);
-            closeActionMenu();
-          }}
-          onRequestMove={(selectedId) => {
-            requestMove([selectedId]);
-            closeActionMenu();
-          }}
-          onSetKept={(selectedId, kept) => {
-            setKept(selectedId, kept);
-            closeActionMenu();
-          }}
           onClearRoll={() => {
             clearRoll(actionMenu.rollId);
             closeActionMenu();
@@ -233,9 +186,6 @@ function DiceActionMenu({
   y,
   onClose,
   onRequestReroll,
-  onSelectMore,
-  onRequestMove,
-  onSetKept,
   onClearRoll,
   onReact,
 }: {
@@ -245,9 +195,6 @@ function DiceActionMenu({
   y: number;
   onClose: () => void;
   onRequestReroll: (dieId: string) => void;
-  onSelectMore: (dieId: string) => void;
-  onRequestMove: (dieId: string) => void;
-  onSetKept: (dieId: string, kept: boolean) => void;
   onClearRoll: () => void;
   onReact: (reaction: RollReaction) => void;
 }) {
@@ -269,13 +216,7 @@ function DiceActionMenu({
 
   if (!die || !self) return null;
 
-  const permission = {
-    requesterId: self.playerId,
-    ownerPlayerId: die.ownerPlayerId,
-    kept: die.kept,
-    status: die.status,
-    mode,
-  } as const;
+  const actions = dieActionsFor(die, self.playerId, mode, { onRequestReroll, onClearRoll });
   const style = { '--menu-x': `${x}px`, '--menu-y': `${y}px` } as CSSProperties;
 
   return (
@@ -303,37 +244,17 @@ function DiceActionMenu({
       >
         Inspect roll
       </button>
-      {canRerollDie(permission) && (
-        <>
-          <button type="button" role="menuitem" onClick={() => onRequestReroll(dieId)}>
-            Pick up and reroll
-          </button>
-          <button type="button" role="menuitem" onClick={() => onSelectMore(dieId)}>
-            Select more dice
-          </button>
-        </>
-      )}
-      {canKeepDie(permission) && (
-        <button type="button" role="menuitem" onClick={() => onSetKept(dieId, !die.kept)}>
-          {die.kept ? 'Release die' : 'Keep die'}
+      {actions.map((action) => (
+        <button key={action.key} type="button" role="menuitem" onClick={action.run}>
+          {action.label}
         </button>
-      )}
-      {canMoveDie(permission) && (
-        <button type="button" role="menuitem" onClick={() => onRequestMove(dieId)}>
-          Move die
-        </button>
-      )}
-      {canClearDie(permission) && (
-        <button type="button" role="menuitem" onClick={onClearRoll}>
-          Clear roll
-        </button>
-      )}
+      ))}
       <button type="button" role="menuitem" onClick={() => setShowReactions((value) => !value)}>
         React <span aria-hidden="true">›</span>
       </button>
       {showReactions && (
         <div className="dice-reaction-options" aria-label="Roll reactions">
-          {REACTIONS.map((item) => (
+          {REACTION_CATALOG.map((item) => (
             <button
               key={item.reaction}
               type="button"
@@ -350,15 +271,6 @@ function DiceActionMenu({
     </div>
   );
 }
-
-const REACTIONS: Array<{ reaction: RollReaction; label: string; symbol: string }> = [
-  { reaction: 'critical', label: 'Critical!', symbol: '★' },
-  { reaction: 'success', label: 'Success', symbol: '✓' },
-  { reaction: 'disaster', label: 'Disaster', symbol: '!' },
-  { reaction: 'suspense', label: 'Suspense', symbol: '…' },
-  { reaction: 'applause', label: 'Applause', symbol: '👏' },
-  { reaction: 'question', label: 'Question', symbol: '?' },
-];
 
 function ownerNameFor(meta: RollMeta, fallback?: string): string {
   return 'ownerNameAtRoll' in meta ? meta.ownerNameAtRoll : (fallback ?? 'A player');
@@ -380,11 +292,4 @@ function displayDieResult(die: {
   if (die.percentilePart === 'tens') return `${(die.result - 1) * 10}`.padStart(2, '0');
   if (die.percentilePart === 'ones') return die.result - 1;
   return die.result;
-}
-
-function openMenuWithKeyboard(event: KeyboardEvent, open: () => void) {
-  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-    event.preventDefault();
-    open();
-  }
 }

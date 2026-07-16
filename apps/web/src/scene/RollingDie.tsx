@@ -5,14 +5,15 @@ import {
   RigidBody,
   type RapierRigidBody,
 } from '@react-three/rapier';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Quaternion, Vector3 } from 'three';
 import { DieMesh, type DieVisualState } from './DieMesh';
 import { getDieDefinition, type SupportedDieType } from './dice/dieDefinitions';
 import { targetQuaternionForResult, upFaceValue } from './dice/orientation';
+import { trackDiePosition, untrackDie } from './dieTracker';
 import { DieExpirationFade } from './DieExpirationFade';
 import { TABLE } from './tableConfig';
-import type { PercentilePart } from '@rollycast/shared';
+import { emoteForImpact, type DieEmote, type PercentilePart } from '@rollycast/shared';
 
 export interface DieSpec {
   id: string;
@@ -52,6 +53,13 @@ const LEVEL_DURATION = 0.12;
 // and notify once so a single cheeky nudge shows.
 const MISS_MARGIN = 0.6;
 const MISS_FLOOR = -0.8;
+// Below this contact force a knock isn't worth a reaction. Tuned against an ordinary two-die throw
+// (the common case), where contacts run ~3/throw at this level and the hardest hit seen was ~500 —
+// a floor set for a 12-die pile-up instead reads as "the dice never react at all".
+const EMOTE_MIN_FORCE = 250;
+// One emote per die per this long. Slightly longer than an emote stays on screen, so a die never
+// interrupts its own reaction.
+const EMOTE_COOLDOWN_MS = 1400;
 
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
@@ -84,6 +92,8 @@ interface RollingDieProps {
   ) => void;
   /** The die flew off the table (fired once); triggers a single cheeky nudge. */
   onMissed?: (rollId: string) => void;
+  /** The die was knocked into hard enough to have an opinion about it. */
+  onEmote?: (dieId: string, emote: DieEmote) => void;
 }
 
 /**
@@ -100,6 +110,7 @@ export function RollingDie({
   onTransform,
   onSettled,
   onMissed,
+  onEmote,
 }: RollingDieProps) {
   const body = useRef<RapierRigidBody>(null);
   const def = getDieDefinition(spec.type);
@@ -108,6 +119,7 @@ export function RollingDie({
   const stillFor = useRef(0);
   const elapsed = useRef(0);
   const missed = useRef(false);
+  const lastEmoteAt = useRef(0);
   const reconcile = useRef<{
     progress: number;
     from: Quaternion;
@@ -115,6 +127,8 @@ export function RollingDie({
     pos: Vector3;
     result: number;
   } | null>(null);
+
+  useEffect(() => () => untrackDie(spec.id), [spec.id]);
 
   useFrame((_, delta) => {
     const rb = body.current;
@@ -124,6 +138,7 @@ export function RollingDie({
 
     if (phase.current === 'rolling') {
       const position = rb.translation();
+      trackDiePosition(spec.id, position.x, position.y, position.z);
       // Missed the table: notify once and stop streaming the rogue position (no server flood), but
       // let the die keep tumbling away under physics — that fall is the look we want to keep.
       if (!missed.current && isOffTable(position.x, position.y, position.z)) {
@@ -179,6 +194,7 @@ export function RollingDie({
       const q = rc.from.clone().slerp(rc.to, easeOutCubic(rc.progress));
       rb.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
       rb.setNextKinematicTranslation({ x: rc.pos.x, y: rc.pos.y, z: rc.pos.z });
+      trackDiePosition(spec.id, rc.pos.x, rc.pos.y, rc.pos.z);
       if (rc.progress >= 1) {
         phase.current = 'done';
         onSettled?.(spec.id, [rc.pos.x, rc.pos.y, rc.pos.z], [q.x, q.y, q.z, q.w], rc.result);
@@ -198,6 +214,17 @@ export function RollingDie({
       linearDamping={0.12}
       angularDamping={0.16}
       ccd
+      userData={{ isDie: true, dieId: spec.id }}
+      onContactForce={({ other, totalForceMagnitude }) => {
+        // Only dice knocking into each other get a reaction — bouncing off the table or the rim
+        // happens on every single throw and would drown the table in emoji.
+        if (!(other.rigidBodyObject?.userData as { isDie?: boolean } | undefined)?.isDie) return;
+        if (totalForceMagnitude < EMOTE_MIN_FORCE) return;
+        const now = performance.now();
+        if (now - lastEmoteAt.current < EMOTE_COOLDOWN_MS) return;
+        lastEmoteAt.current = now;
+        onEmote?.(spec.id, emoteForImpact(totalForceMagnitude));
+      }}
     >
       {def.collider.kind === 'cuboid' ? (
         <CuboidCollider args={def.collider.halfExtents} />

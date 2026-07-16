@@ -9,6 +9,9 @@ test('every standard die type can produce a finalized shared result', async ({ p
   await expect(page.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('canvas')).toBeVisible({ timeout: 45_000 });
 
+  // The dice tray is collapsed behind the floating "Dice" menu.
+  await page.locator('.dock-menu-toggle').click();
+
   for (const type of ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100']) {
     await page.getByRole('button', { name: type, exact: true }).click();
     await page.getByRole('button', { name: `Roll 1${type}` }).click();
@@ -24,8 +27,8 @@ test('every standard die type can produce a finalized shared result', async ({ p
   await page.getByRole('button', { name: 'd20', exact: true }).click();
   await page.getByRole('button', { name: 'Fewer dice' }).click();
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await page.getByLabel('Roll modifier').fill('5');
-  await page.getByRole('button', { name: 'Roll 2d6 + 1d20 + 5' }).click();
+  // No modifier: the tray's modifier control was removed, so a pool rolls on its dice alone.
+  await page.getByRole('button', { name: 'Roll 2d6 + 1d20' }).click();
   await expect(page.locator('.rolllog-entry')).toHaveCount(8, { timeout: 20_000 });
-  await expect(page.locator('.rolllog-entry').filter({ hasText: '2d6 + 1d20 + 5' })).toHaveCount(1);
+  await expect(page.locator('.rolllog-entry').filter({ hasText: '2d6 + 1d20' })).toHaveCount(1);
 });
