@@ -16,7 +16,32 @@ import { TableAppearancePanel } from './TableAppearancePanel';
 import { SceneErrorBoundary } from './SceneErrorBoundary';
 import './room.css';
 
-const DiceScene = lazy(() => import('../../scene/DiceScene'));
+const STALE_BUILD_KEY = 'rollycast:reloaded-for-stale-build';
+
+/**
+ * The 3D scene is a lazily imported, content-hashed chunk, so a deploy deletes the exact file an
+ * already-open tab is about to ask for. Worse, the asset router answers a missing file with
+ * index.html rather than a 404, so the browser tries to parse HTML as a module and throws — the
+ * table then looks broken to anyone who had the page open across a deploy.
+ *
+ * Reload once to pick up the new build, which is what a manual refresh does. The session marker
+ * stops a genuinely broken chunk from becoming a reload loop; it is cleared on the next successful
+ * load so a later deploy can heal itself the same way.
+ */
+const DiceScene = lazy(() =>
+  import('../../scene/DiceScene')
+    .then((module) => {
+      sessionStorage.removeItem(STALE_BUILD_KEY);
+      return module;
+    })
+    .catch((error: unknown) => {
+      if (sessionStorage.getItem(STALE_BUILD_KEY)) throw error;
+      sessionStorage.setItem(STALE_BUILD_KEY, '1');
+      window.location.reload();
+      // Leave Suspense showing its fallback; the reload replaces this document.
+      return new Promise<never>(() => {});
+    }),
+);
 
 interface RoomPageProps {
   code: string;
