@@ -7,6 +7,12 @@
     "bindings": [{ "name": "Room", "class_name": "RoomServer" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomServer"] }],
+  "routes": [
+    { "pattern": "rollycast.com", "custom_domain": true },
+    { "pattern": "www.rollycast.com", "custom_domain": true },
+  ],
+  // Keep the workers.dev URL alive; an explicit `routes` list otherwise disables it.
+  "workers_dev": true,
   "observability": { "enabled": true },
   "dev": { "port": 8787 },
   "assets": {
