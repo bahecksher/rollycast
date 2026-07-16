@@ -116,9 +116,6 @@ export function InspectionOverlay() {
 
         {selectedDie && (
           <div className="inspection-die-actions">
-            <p className="inspection-die-actions-label">
-              {selectedDie.type} showing <strong>{displayDieResult(selectedDie)}</strong>
-            </p>
             {panelActions.length > 0 ? (
               <div className="inspection-action-grid">
                 {panelActions.map((action) => (

@@ -9,6 +9,12 @@ async function enterNewRoom(page: import('@playwright/test').Page, displayName: 
   await expect(page.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
 }
 
+/** The dice tray is collapsed behind the floating "Dice" menu, so the Roll button starts hidden. */
+async function openDiceTray(page: import('@playwright/test').Page) {
+  await page.locator('.dock-menu-toggle').click();
+  await expect(page.getByRole('button', { name: /^Roll / })).toBeVisible();
+}
+
 test.describe('local 3D dice roller (Milestone 1)', () => {
   test('loads the scene and records rolls', async ({ page }) => {
     const errors: string[] = [];
@@ -18,6 +24,7 @@ test.describe('local 3D dice roller (Milestone 1)', () => {
 
     // The lazy 3D scene mounts a canvas once three.js + Rapier load.
     await expect(page.locator('canvas')).toBeVisible({ timeout: 45_000 });
+    await openDiceTray(page);
 
     const roll = page.getByRole('button', { name: /^Roll / });
     for (let i = 0; i < 3; i += 1) {
@@ -38,6 +45,7 @@ test.describe('local 3D dice roller (Milestone 1)', () => {
 
     await enterNewRoom(page, 'Stress Tester');
     await expect(page.locator('canvas')).toBeVisible({ timeout: 45_000 });
+    await openDiceTray(page);
 
     const roll = page.getByRole('button', { name: /^Roll / });
     for (let i = 0; i < 100; i += 1) {

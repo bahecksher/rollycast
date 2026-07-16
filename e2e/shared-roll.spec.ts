@@ -28,6 +28,8 @@ test('a server-authoritative roll is shared and available to a late joiner', asy
   const roomUrl = await createAndJoin(owner, 'Alice');
   const observer = await joinExisting(browser, roomUrl, 'Bob');
 
+  // The dice tray is collapsed behind the floating "Dice" menu.
+  await owner.locator('.dock-menu-toggle').click();
   await owner.getByRole('button', { name: 'Roll 1d20' }).click();
   await owner.getByRole('button', { name: /^History/ }).click();
   await observer.page.getByRole('button', { name: /^History/ }).click();
