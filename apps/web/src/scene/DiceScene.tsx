@@ -6,6 +6,7 @@ import { useInspectionStore } from '../state/inspectionStore';
 import { useRoomStore } from '../state/roomStore';
 import { CameraZoom } from './CameraZoom';
 import { DiceTable } from './DiceTable';
+import { DieEmoteLayer } from './DieEmoteLayer';
 import { Lighting } from './Lighting';
 import { RollingDie } from './RollingDie';
 import { RemoteDie } from './RemoteDie';
@@ -33,6 +34,7 @@ export default function DiceScene({ reducedMotion = false }: DiceSceneProps) {
   const throwSelection = useLocalRoller((s) => s.throwSelection);
   const markSettled = useLocalRoller((s) => s.markSettled);
   const dieMissed = useLocalRoller((s) => s.dieMissed);
+  const emitDieEmote = useLocalRoller((s) => s.emitDieEmote);
   const updateTransform = useLocalRoller((s) => s.updateTransform);
   const appearance = useRoomStore((s) => s.settings.appearance);
   const activeGrab = useLocalRoller((s) => s.activeGrab);
@@ -82,6 +84,7 @@ export default function DiceScene({ reducedMotion = false }: DiceSceneProps) {
                 onTransform={updateTransform}
                 onSettled={markSettled}
                 onMissed={dieMissed}
+                onEmote={reducedMotion ? undefined : emitDieEmote}
               />
             ) : (
               <RemoteDie
@@ -110,6 +113,7 @@ export default function DiceScene({ reducedMotion = false }: DiceSceneProps) {
               onThrow={throwSelection}
             />
           )}
+          {!reducedMotion && <DieEmoteLayer />}
         </Physics>
       </Suspense>
     </Canvas>
