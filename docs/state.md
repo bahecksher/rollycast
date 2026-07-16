@@ -1,54 +1,44 @@
 # State
-_Last updated: 2026-07-16 1557_
+
+_Last updated: 2026-07-16 1827_
 
 **Live at https://rollycast.com** (Worker + assets, version `4d61cc41`). Deploying needs no new auth —
-an existing `wrangler` OAuth session is in place.
+an existing `wrangler` OAuth session (bretthecksher@gmail.com, `workers (write)`) is in place, so
+`npm run deploy` just works. `main` is pushed and the working tree is clean.
 
 ## Current focus
 
-Character + cleanup pass. Cross-player dice collision, dice that emote when knocked about, roll
-reactions that persist and show inline in their history row, and a heavily trimmed inspection panel
-(Reroll + Clear roll only, actions inline, no second popup). Emote thresholds were retuned twice and
-are now measured against an ordinary throw. Inspected dice are held on the table instead of being swept
-mid-read. Clean stopping point; full verification green.
+Character + cleanup pass, shipped. Dice from different players collide, dice emote when knocked about,
+roll reactions persist and live on their history row, and the inspection panel is trimmed to one
+surface with Reroll + Clear roll. The whole e2e suite is green for the first time, and the app is
+deployed and verified in production.
 
 ## What's working
 
 - M0–M9 remain implemented (authoritative rooms/rolls, complete dice set, history/inspection,
   accessible actions, ownership and linked/shared rerolls, keep/move/clear, reactions/fading, host
-  appearance/settings, recovery, fallbacks, reduced motion, rate limits, performance controls,
-  tests, deployment config).
-- Previous session's usability batch (top-bar player name/color editing, orange theme, new board
-  colors, wheel/pinch zoom, floating hamburger dice tray, off-table fall-away, tinted history rows,
-  rename to RollyCast) all still in place.
-- This session's changes (all compile/lint/test-green, and verified in the running app):
-  - **Cross-player collision**: `RemoteDie` is now a `kinematicPosition` body with the same collider,
-    following streamed transforms via `setNextKinematic*`. Your dice collide with everyone else's;
-    each client stays sole authority for its own dice's results. Verified visually — 6 crimson + 6
-    gold dice rest side by side and stacked, no interpenetration.
-  - **Dice emotes**: die-vs-die contacts above a force floor pop an emoji sprite above the die that
-    floats up and fades (`DieEmoteLayer` + `emoteTexture` + `dieTracker`). Fires on *any* die hitting
-    *any* die, including your own. Broadcast room-wide via a new `DIE_EMOTE` message with its own rate
-    limit that drops silently. Cosmetic only — never recorded. Thresholds (floor 250 / medium 450 /
-    heavy 1,000) measured against an ordinary 2-die throw: ~2.5 emotes per throw, and the same for a
-    6-die throw, bound by the per-die cooldown rather than the rate limiter.
-  - **Roll reactions fixed**: now stored on `RollRecord` (survive reconnects, reach late joiners),
-    toggle off when re-sent, and reachable from the roll's own history row via chips + a `+` picker.
-    Broadcast carries the full reaction set so a dropped message can't leave a row wrong. Reaction
-    rate limit raised 3/10s → 8/10s.
-  - **Inspection panel de-duplicated and trimmed**: "Actions for selected die" (which opened a second
-    popup on top of the panel) is gone; the panel shows the die's actions and a reaction row inline.
-    Actions are now just **Reroll** and **Clear roll** — "Select more dice", "Keep die", "Move die",
-    the Modifier row, and the per-die result chips were all removed at the user's request. The
-    right-click/long-press popup stays as the fast path on the 3D die. Both build their action list
-    from one `dieActionsFor` helper, so permission rules can't drift between them.
-  - **Inspected dice stay put**: a client re-sends `KEEP_ROLL_ALIVE` every 10s while it has a roll
-    inspected; the server pushes that roll's unkept dice out a full lifetime and broadcasts
-    `ROLL_EXPIRY_EXTENDED` so every client's fade agrees. Stops on close, so dice resume their
-    countdown. Verified: inspected die survives 40s; expires ~35s after deselect.
-- Full verification passes on system Node: `typecheck`, `lint`, `format:check`, `build`, all 105 unit
-  tests (78 shared + 16 web + 11 worker), and the **full Playwright suite: 10/10 desktop-chrome and
-  10/10 mobile-portrait**.
+  appearance/settings, recovery, fallbacks, reduced motion, rate limits, performance controls, tests,
+  deployment config).
+- **Cross-player collision.** `RemoteDie` is a `kinematicPosition` body with the same collider,
+  following streamed transforms via `setNextKinematic*`. Your dice collide with everyone else's while
+  each client stays sole authority for its own dice's results. Verified visually in production.
+- **Dice emotes.** Die-vs-die contacts above a force floor pop an emoji sprite that floats up and
+  fades (`DieEmoteLayer` + `emoteTexture` + `dieTracker`), broadcast via `DIE_EMOTE` with its own
+  silently-dropping rate limit. Fires on *any* die hitting *any* die, including your own. Cosmetic and
+  never recorded. Floor 250 / medium 450 / heavy 1,000 → ~2.5 emotes per throw.
+- **Roll reactions.** Stored on `RollRecord`, so they survive reconnects and reach late joiners.
+  Toggle off when re-sent. Chips + `+` picker on the roll's own history row, and a reaction row in the
+  panel. Broadcasts carry the full reaction set, so a dropped message can't leave a row wrong.
+- **Inspection panel.** One surface: roll summary, then the die's actions (**Reroll**, **Clear roll**)
+  and reactions inline. The right-click/long-press popup remains the fast path on the 3D die; both
+  build from one `dieActionsFor` helper.
+- **Inspected dice stay put.** A client re-sends `KEEP_ROLL_ALIVE` every 10s while a roll is
+  inspected; the server extends that roll's unkept dice and broadcasts `ROLL_EXPIRY_EXTENDED`. Stops
+  on close, so dice resume their countdown.
+- **Deploys no longer break open tabs.** A failed 3D-scene import reloads once to pick up the new
+  build (`e2e/stale-build.spec.ts`).
+- Verification: `typecheck`, `lint`, `format:check`, `build`, **105 unit tests** (78 shared + 16 web +
+  11 worker), and **11/11 desktop-chrome + 10/10 mobile-portrait** Playwright.
 
 ## In progress
 
@@ -56,100 +46,82 @@ Nothing mid-change. Clean stopping point.
 
 ## Known issues
 
-- ~~Stale e2e specs~~ — **fixed**. Five (not three) were red from earlier sessions: the Roll button and
-  die types moved behind the floating Dice menu, `complete-dice` drove a removed "Roll modifier" input,
-  and the appearance toggle was renamed to "Host controls". `full-room-flow` also needed a rewrite
-  around the new inline panel actions. Desktop and mobile-portrait now run **10/10 each**.
-- **Multi-die rolls no longer show individual dice values in the panel.** The per-die result chips and
-  the "d20 showing 15" label were both removed as duplicative, so a 2d20 shows only the expression and
-  the total, and there is no in-panel indication of *which* die Reroll applies to (it is the one you
-  clicked, or the first if you opened from History). History rows still show `[14, 4]`.
-- **Multi-select / keep / move are unreachable from the UI** but still fully present in state, protocol,
-  and the server (`SET_DIE_KEPT`, move grabs, `beginMultiSelect` and friends). Dead paths, not dead
-  code — worth a decision on whether to rip them out.
-- **Emotes are disabled entirely under reduced motion** (`onEmote` is not wired when
-  `prefers-reduced-motion` is set). Expected, but a plausible "why don't I see emotes" cause.
-- **Emote frequency is subjective.** ~2.5 per throw at floor 250 / medium 450 / heavy 1,000, measured
-  for both 2- and 6-die throws. Heavy emotes (😡/🤕) need a genuine slam and stay rare in normal play.
+- **Multi-die rolls don't show individual dice values in the panel.** The per-die chips and the
+  "d20 showing 15" label were both removed as duplicative, so a 2d20 shows only the expression and
+  total, and nothing indicates *which* die Reroll applies to (the one you clicked, or the first if
+  opened from History). History rows still show `[14, 4]`.
+- **Keep / move / multi-select are unreachable from the UI** but fully present in state, protocol and
+  server (`SET_DIE_KEPT`, move grabs, `beginMultiSelect`). Dead paths, not dead code.
+- **Emotes are disabled entirely under reduced motion.** Expected, but a plausible "why don't I see
+  emotes" cause.
+- **Emote frequency is subjective.** ~2.5/throw, measured for 2- and 6-die throws. Heavy emotes
+  (😡/🤕) need a genuine slam and stay rare.
+- **Deploys can strand open tabs.** Missing assets return `index.html` with a 200 (SPA fallback), not
+  a 404, so an open tab importing an old hashed chunk parses HTML as JS. Mitigated by the reload
+  recovery; the underlying behaviour is unchanged (see docs/decisions.md for why).
+- **Wire compatibility during a deploy window.** `ROLL_REACTION` gained two required fields, so a new
+  server's reaction messages are dropped by an old open tab until it reloads. `PROTOCOL_VERSION`
+  deliberately stays at 1 — bumping it would make old tabs reject *every* message instead.
 - **Clients disagree slightly on cross-player bounce visuals.** Each client simulates its own dice
-  against kinematic ghosts of everyone else's, so the exact bounce differs per screen. Deliberate — see
-  docs/decisions.md.
-- **Running Playwright can kill a dev server you started.** `reuseExistingServer: !CI` means Playwright
-  tears down any server *it* had to start. Have both `dev:worker` and `dev:web` up before an e2e run,
-  or expect "create a table" to break afterwards.
-- **History event rows (name/color changes) are still client-side only** — every connected client sees
-  them, but they are not persisted and vanish on reconnect. (Roll *reactions* are now persisted; these
-  event rows are not.)
+  against kinematic ghosts of the rest. Deliberate — see docs/decisions.md.
+- **Playwright can kill a dev server you started.** `reuseExistingServer: !CI` means it tears down any
+  server *it* had to start. Have `dev:worker` and `dev:web` both up before an e2e run.
+- **History event rows (name/color changes) are client-side only** and vanish on reconnect. (Roll
+  reactions are now persisted; these event rows are not.)
 - **New default board colors apply to new rooms only.** Existing rooms keep their stored appearance
   until a host does Reset → Save.
 - Physics-authoritative results remain a deliberate reversal of the spec's server-authoritative
-  requirement (see docs/decisions.md and the physics-authoritative spec).
-- On mobile portrait the inspection panel overlays the lower ~half of the table canvas — now slightly
-  worse, since the panel absorbed the die actions that used to live in a popup.
-- Held-die swing / curve-ball feel and zoom limits (~0.55×–1.7×) are subjective; awaiting a
-  real-hardware feel-check.
+  requirement (docs/decisions.md).
+- On mobile portrait the inspection panel overlays the lower ~half of the canvas — slightly better
+  than earlier today now the label and chips are gone, but still overlapping.
 - The lazy 3D scene chunk is ~3.18 MB min / ~1.09 MB gzip; further splitting is post-MVP.
-- **A deploy pulls hashed chunks out from under open tabs.** Missing assets are served as `index.html`
-  with a 200 (SPA fallback), not a 404, so an open tab importing the old 3D chunk parses HTML as JS and
-  throws. Mitigated: the client reloads once on a failed scene import (`e2e/stale-build.spec.ts`
-  covers it, verified against live production). The underlying "missing asset returns HTML" behaviour
-  is unchanged — see docs/decisions.md for why.
-- **Wire compatibility during a deploy window.** `ROLL_REACTION` gained two required fields
-  (`removed`, `reactions`). A freshly deployed server sending that to a still-open old tab fails the
-  old client's validation and the message is dropped. `PROTOCOL_VERSION` is deliberately left at 1:
-  bumping it would make old tabs reject *every* message rather than just reactions. Self-heals on
-  reload. Note: GitHub Pages (which the user floated) is static-only and cannot host the Worker/DO
-  backend.
+- GitHub Pages cannot host this — the Worker/DO backend needs Cloudflare.
 
 ## Next actions
-1. Feel-check on real hardware: emote frequency (~2.5/throw now) and how collision reads with 2+
-   players throwing at once. Tune `EMOTE_MIN_FORCE` / `EMOTE_COOLDOWN_MS` (RollingDie) and
-   `MEDIUM_IMPACT` / `HEAVY_IMPACT` (shared/emotes.ts) if wanted.
+
+1. Feel-check on the live site: emote frequency and how collision reads with 2+ players throwing at
+   once. Tune `EMOTE_MIN_FORCE` / `EMOTE_COOLDOWN_MS` (RollingDie) and `MEDIUM_IMPACT` /
+   `HEAVY_IMPACT` (shared/emotes.ts) if wanted.
 2. Decide whether multi-die rolls need their per-die values back in the panel.
-3. Decide whether to remove the now-unreachable keep/move/multi-select machinery.
+3. Decide whether to remove the unreachable keep/move/multi-select machinery.
 4. Consider the mobile inspection-panel-over-canvas overlap.
 
 ## Active plan
 
-docs/plans/2026-07-16 1402 Plan - Dice collision, emotes, and persistent reactions.md
+docs/plans/2026-07-16 1402 Plan - Dice collision, emotes, and persistent reactions.md (delivered)
 
 ## How to verify
 
-`npm run dev` (system Node 24 on PATH). Then:
-- Open two browsers on the same room. Throw a handful of dice from both at once: they should knock into
-  each other rather than pass through, and dice that take a real knock pop an emoji that both players
-  see.
-- Open History, click `+` on a roll's row, pick a reaction: a chip appears in that same row on every
+`npm run dev` (system Node 24 on PATH), or use https://rollycast.com. Then:
+
+- Open two browsers on one room. Throw dice from both at once: they should knock into each other
+  rather than pass through, and dice taking a real knock pop an emoji both players see.
+- Open History, click `+` on a roll's row, pick a reaction: a chip appears in that row on every
   client. Click your own chip to remove it. Reload — the chip is still there.
-- Click a die: the inspection panel shows the roll, Reroll / Clear roll, and a reaction row in one
-  surface. Right-click a die for the popup menu. Leave it inspected for a minute — the die must not
-  disappear; close the panel and it should vanish ~30s later.
-- Throw 2 dice: they should knock into each other and emote roughly a couple of times per throw.
+- Click a die: the panel shows the roll, Reroll / Clear roll, and reactions in one surface. Leave it
+  inspected for a minute — the die must not disappear; close the panel and it goes ~30s later.
 - Full suite: `npm run typecheck && npm test && npm run lint && npm run format:check && npm run build`.
-- E2E: `npx playwright test e2e/reactions.spec.ts` passes. The full suite has three pre-existing
-  failures (see Known issues). Start both dev servers before running, or Playwright will tear down the
-  Worker it started and "create a table" will 000 afterwards.
+- E2E: `npx playwright test` — 11/11 desktop-chrome, 10/10 mobile-portrait. Start both dev servers
+  first (see Known issues).
+- Deploy: `npm run deploy`.
 
 ## Recent logs
 
-- docs/log/2026-07-16 1557 Green e2e suite and first live deploy.md — fixed all five red e2e specs
-  (10/10 desktop + 10/10 mobile), dropped the duplicate die label, deployed to rollycast.com.
-
+- docs/log/2026-07-16 1827 Session wrap-up.md — what shipped this session, plus three mistakes worth
+  carrying forward (tuning to the wrong scenario twice; a green production test that only tested fresh
+  visitors; reverting the user's tree under a live dev server).
+- docs/log/2026-07-16 1557 Green e2e suite and first live deploy.md — fixed all five red e2e specs,
+  dropped the duplicate die label, deployed to rollycast.com; addendum covers the stale-chunk bug that
+  broke open tabs after the first deploy and its reload fix.
 - docs/log/2026-07-16 1509 Trim die actions, fix emote threshold, hold inspected dice.md — actions cut
   to Reroll + Clear roll; emotes were unreachable (floor 800 vs a 2-die max of ~505) and are now tuned
   to the common case; inspected rolls held on the table via a keep-alive.
 - docs/log/2026-07-16 1448 Inspection panel - inline die actions.md — removed the redundant "Actions
-  for selected die" button; the panel now carries the die's actions and reactions inline, and both it
-  and the popup menu share one `dieActionsFor` definition.
+  for selected die" button; the panel carries the die's actions and reactions inline, and it and the
+  popup menu share one `dieActionsFor` definition.
 - docs/log/2026-07-16 1428 Dice collision, emotes, and persistent reactions.md — remote dice became
   kinematic bodies so cross-player dice collide; die-vs-die emotes broadcast room-wide with measured
-  force thresholds; roll reactions persisted on the roll record and surfaced as chips in the history row.
+  force thresholds; roll reactions persisted and surfaced as chips in the history row.
 - docs/log/2026-07-16 0136 Usability pass - controls, colors, history, rename.md — top-bar player
-  controls, orange theme + new board colors, zoom, floating hamburger tray, off-table fall-away with
-  a single cheeky message, color-tinted history + name/color event rows, rename to RollyCast.
-- docs/log/2026-07-16 0025 Held-die juggle, curveball throw, fair spawn.md — pre-throw die swings on
-  a string and rolls with the drag; throw spin derived from the flick; random spawn orientation.
-- docs/log/2026-07-15 2202 Physics-authoritative dice results.md — die shows what it lands on; that
-  is the recorded result. Server RNG kept only as an abandoned-roll fallback.
-- docs/log/2026-07-15 2001 Build review and settle-flip fix.md — verified Codex's work, fixed the
-  settle correction blend, made the e2e suite reliable.
+  controls, orange theme + new board colors, zoom, floating hamburger tray, off-table fall-away,
+  color-tinted history + event rows, rename to RollyCast.
