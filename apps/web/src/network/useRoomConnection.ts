@@ -231,6 +231,12 @@ export function useRoomConnection(roomCode: string, profile: JoinProfile | null)
         case ServerMessageType.ROLL_REACTION:
           useLocalRoller.getState().receiveReaction(message.payload);
           break;
+        case ServerMessageType.DIE_EMOTE:
+          useLocalRoller.getState().receiveDieEmote(message.payload);
+          break;
+        case ServerMessageType.ROLL_EXPIRY_EXTENDED:
+          useLocalRoller.getState().receiveExpiryExtended(message.payload);
+          break;
         case ServerMessageType.ROOM_CLOSED:
           store().setError('This room has expired.');
           store().setStatus('error');
