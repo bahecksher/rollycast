@@ -88,6 +88,18 @@ longer be manually kept — which is what motivated the keep-alive below. The un
 messages, and server handlers for keep/move/multi-select all remain; only the UI entry points are
 gone. — 2026-07-16
 
+**A failed 3D-scene import reloads the page once, rather than showing the error placeholder.** Reported
+from production after the first deploy: "The 3D table couldn't start", fixed by a hard refresh. The
+scene is a lazily imported content-hashed chunk, so a deploy deletes the exact file an already-open tab
+is about to request; the asset router then answers the missing file with `index.html` instead of a 404
+(`not_found_handling: single-page-application`), so the browser parses HTML as a module and throws.
+This would hit every open tab on every deploy. The client now reloads once on a failed scene import —
+what the manual refresh did — guarded by a session marker so a genuinely broken chunk cannot loop, and
+cleared on the next successful load so later deploys heal the same way. Deliberately *not* fixed by
+re-routing `/assets/*` to return real 404s: with the reload in place the behaviour is identical, and
+inverting `not_found_handling` on a live site to gain debuggability is not worth the risk of 404-ing
+every SPA route. — 2026-07-16
+
 **An inspected roll's dice are held on the table by a client keep-alive.** With "Keep die" removed,
 nothing stopped a die being swept 30s after settling while a player was still looking at it. Inspection
 is deliberately local-only (spec §9), so the server cannot know a die is selected; and auto-keeping on

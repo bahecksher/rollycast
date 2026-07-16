@@ -1,6 +1,9 @@
 # State
 _Last updated: 2026-07-16 1557_
 
+**Live at https://rollycast.com** (Worker + assets, version `4d61cc41`). Deploying needs no new auth —
+an existing `wrangler` OAuth session is in place.
+
 ## Current focus
 
 Character + cleanup pass. Cross-player dice collision, dice that emote when knocked about, roll
@@ -86,6 +89,11 @@ Nothing mid-change. Clean stopping point.
 - Held-die swing / curve-ball feel and zoom limits (~0.55×–1.7×) are subjective; awaiting a
   real-hardware feel-check.
 - The lazy 3D scene chunk is ~3.18 MB min / ~1.09 MB gzip; further splitting is post-MVP.
+- **A deploy pulls hashed chunks out from under open tabs.** Missing assets are served as `index.html`
+  with a 200 (SPA fallback), not a 404, so an open tab importing the old 3D chunk parses HTML as JS and
+  throws. Mitigated: the client reloads once on a failed scene import (`e2e/stale-build.spec.ts`
+  covers it, verified against live production). The underlying "missing asset returns HTML" behaviour
+  is unchanged — see docs/decisions.md for why.
 - **Wire compatibility during a deploy window.** `ROLL_REACTION` gained two required fields
   (`removed`, `reactions`). A freshly deployed server sending that to a still-open old tab fails the
   old client's validation and the message is dropped. `PROTOCOL_VERSION` is deliberately left at 1:

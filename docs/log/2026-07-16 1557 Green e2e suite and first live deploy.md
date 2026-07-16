@@ -62,3 +62,29 @@ reload — strictly worse for the deploy window.
 
 typecheck / lint / format / build clean, 105 unit tests, 20/20 e2e across both projects, then deployed
 and checked the live site.
+
+---
+
+## Addendum: the deploy broke open tabs
+
+The user hit "The 3D table couldn't start" on rollycast.com right after the deploy; a hard refresh
+fixed it, which pinned the cause exactly.
+
+The 3D scene is a lazily imported content-hashed chunk. Deploying deletes the file an already-open tab
+is about to request, and `not_found_handling: single-page-application` answers the missing file with
+`index.html` and a 200 — so the browser parses HTML as a module and throws into the scene error
+boundary. Confirmed directly: the pre-deploy chunk URL returns `content-type: text/html`.
+
+**Why the production smoke test missed it:** `browser.newContext()` starts with an empty cache, so it
+only ever exercised a fresh visitor. The failure needs a client that already holds the *old* build.
+A green production check proved nothing about the population that was actually broken.
+
+Fix: reload once on a failed scene import, guarded by a session marker against loops and cleared on
+the next successful load. `e2e/stale-build.spec.ts` serves HTML for the chunk exactly as production
+does and asserts the document loads more than once — the reload is the only path to the canvas, so the
+test fails if the recovery regresses. Also verified against live production with the real pre-deploy
+chunk URL: `servedStale=true loads=2 -> canvas recovered`.
+
+Not fixed: `/assets/*` still returns HTML for missing files rather than 404. With the reload in place
+the behaviour is identical, and inverting `not_found_handling` on a live site risks 404-ing every SPA
+route to gain only debuggability.
