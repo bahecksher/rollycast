@@ -1,5 +1,5 @@
 # State
-_Last updated: 2026-07-16 1509_
+_Last updated: 2026-07-16 1557_
 
 ## Current focus
 
@@ -43,8 +43,9 @@ mid-read. Clean stopping point; full verification green.
     inspected; the server pushes that roll's unkept dice out a full lifetime and broadcasts
     `ROLL_EXPIRY_EXTENDED` so every client's fade agrees. Stops on close, so dice resume their
     countdown. Verified: inspected die survives 40s; expires ~35s after deselect.
-- Full verification passes on system Node: `typecheck`, `lint`, `format:check`, `build`, and all 104
-  unit tests (78 shared + 16 web + 10 worker). `e2e/reactions.spec.ts` passes.
+- Full verification passes on system Node: `typecheck`, `lint`, `format:check`, `build`, all 105 unit
+  tests (78 shared + 16 web + 11 worker), and the **full Playwright suite: 10/10 desktop-chrome and
+  10/10 mobile-portrait**.
 
 ## In progress
 
@@ -52,13 +53,14 @@ Nothing mid-change. Clean stopping point.
 
 ## Known issues
 
-- **Three e2e specs are red, pre-existing**: `dice-local`, `full-room-flow`, and `shared-roll` click the
-  Roll button without opening the floating "Dice" tray that last session put it behind. One-line fix
-  each (`await page.locator('.dock-menu-toggle').click()`); left alone as out of scope this session.
-  `landing`, `appearance`, `presence`, `complete-dice` not re-checked.
-- **Multi-die rolls no longer show individual dice values in the panel.** Removing the per-die result
-  chips means a 2d20 shows the total and only the *selected* die's face; History rows still show
-  `[14, 4]`. Chips could come back for multi-die rolls only if wanted.
+- ~~Stale e2e specs~~ — **fixed**. Five (not three) were red from earlier sessions: the Roll button and
+  die types moved behind the floating Dice menu, `complete-dice` drove a removed "Roll modifier" input,
+  and the appearance toggle was renamed to "Host controls". `full-room-flow` also needed a rewrite
+  around the new inline panel actions. Desktop and mobile-portrait now run **10/10 each**.
+- **Multi-die rolls no longer show individual dice values in the panel.** The per-die result chips and
+  the "d20 showing 15" label were both removed as duplicative, so a 2d20 shows only the expression and
+  the total, and there is no in-panel indication of *which* die Reroll applies to (it is the one you
+  clicked, or the first if you opened from History). History rows still show `[14, 4]`.
 - **Multi-select / keep / move are unreachable from the UI** but still fully present in state, protocol,
   and the server (`SET_DIE_KEPT`, move grabs, `beginMultiSelect` and friends). Dead paths, not dead
   code — worth a decision on whether to rip them out.
@@ -84,19 +86,20 @@ Nothing mid-change. Clean stopping point.
 - Held-die swing / curve-ball feel and zoom limits (~0.55×–1.7×) are subjective; awaiting a
   real-hardware feel-check.
 - The lazy 3D scene chunk is ~3.18 MB min / ~1.09 MB gzip; further splitting is post-MVP.
-- Live deployment still requires Cloudflare authorization; no external deploy attempted. Note:
-  GitHub Pages (which the user floated) is static-only and cannot host the Worker/DO backend.
-- No git commits yet (git push deferred by the user in the previous session).
+- **Wire compatibility during a deploy window.** `ROLL_REACTION` gained two required fields
+  (`removed`, `reactions`). A freshly deployed server sending that to a still-open old tab fails the
+  old client's validation and the message is dropped. `PROTOCOL_VERSION` is deliberately left at 1:
+  bumping it would make old tabs reject *every* message rather than just reactions. Self-heals on
+  reload. Note: GitHub Pages (which the user floated) is static-only and cannot host the Worker/DO
+  backend.
 
 ## Next actions
 1. Feel-check on real hardware: emote frequency (~2.5/throw now) and how collision reads with 2+
    players throwing at once. Tune `EMOTE_MIN_FORCE` / `EMOTE_COOLDOWN_MS` (RollingDie) and
    `MEDIUM_IMPACT` / `HEAVY_IMPACT` (shared/emotes.ts) if wanted.
 2. Decide whether multi-die rolls need their per-die values back in the panel.
-3. Decide on the three stale e2e specs — one-line tray-open fix each.
-4. Decide whether to remove the now-unreachable keep/move/multi-select machinery.
-5. When ready: full `npx playwright test`, then git commit/push.
-6. Revisit hosting: Cloudflare (Worker + Pages/Assets) for a full deploy.
+3. Decide whether to remove the now-unreachable keep/move/multi-select machinery.
+4. Consider the mobile inspection-panel-over-canvas overlap.
 
 ## Active plan
 
@@ -120,6 +123,9 @@ docs/plans/2026-07-16 1402 Plan - Dice collision, emotes, and persistent reactio
   Worker it started and "create a table" will 000 afterwards.
 
 ## Recent logs
+
+- docs/log/2026-07-16 1557 Green e2e suite and first live deploy.md — fixed all five red e2e specs
+  (10/10 desktop + 10/10 mobile), dropped the duplicate die label, deployed to rollycast.com.
 
 - docs/log/2026-07-16 1509 Trim die actions, fix emote threshold, hold inspected dice.md — actions cut
   to Reroll + Clear roll; emotes were unreachable (floor 800 vs a 2-die max of ~505) and are now tuned
