@@ -66,3 +66,11 @@ export const useRoomStore = create<RoomStore>((set) => ({
       errorMessage: null,
     }),
 }));
+
+// Dev-only handle so end-to-end tests can read applied room state — e.g. a guest confirming the
+// host's appearance reached it, which never surfaces in the guest's DOM (only in the 3D scene).
+// `import.meta.env.DEV` is statically false in production builds, so Vite strips this block out.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __rollycastRoomStore: typeof useRoomStore }).__rollycastRoomStore =
+    useRoomStore;
+}

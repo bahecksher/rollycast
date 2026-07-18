@@ -54,6 +54,36 @@ test('the host customizes the shared table appearance and keeps it after reload'
   await host.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(host.locator('.room-appearance-message')).toContainText('saved');
 
+  // The guest never sees the appearance editor, and the colors/image live only inside the 3D
+  // canvas, so verify propagation through the room state the scene renders from: the host's surface
+  // color and uploaded image must reach the guest live over the broadcast.
+  const guestAppearance = () =>
+    guest.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __rollycastRoomStore?: {
+              getState(): {
+                settings: { appearance: { surfaceColor: string; backgroundImage: string | null } };
+              };
+            };
+          }
+        ).__rollycastRoomStore?.getState().settings.appearance,
+    );
+  await expect.poll(async () => (await guestAppearance())?.surfaceColor).toBe('#345678');
+  await expect
+    .poll(async () => (await guestAppearance())?.backgroundImage?.slice(0, 15))
+    .toBe('data:image/jpeg');
+
+  // Reloading the guest re-joins from stored identity and rehydrates from the ROOM_STATE snapshot,
+  // so a non-host who arrives after the change still gets the customized table.
+  await guest.reload();
+  await expect(guest.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => (await guestAppearance())?.surfaceColor).toBe('#345678');
+  await expect
+    .poll(async () => (await guestAppearance())?.backgroundImage?.slice(0, 15))
+    .toBe('data:image/jpeg');
+
   await host.reload();
   await expect(host.locator('.room-status-dot.is-connected')).toBeVisible({ timeout: 15_000 });
   await host.getByLabel('Host controls').click();
